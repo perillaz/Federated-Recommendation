@@ -24,6 +24,7 @@ class DataLoader(object):
             target_train_data, target_test_data)
         opt["target_user_num"] = len(self.target_user)
         opt["target_item_num"] = len(self.target_item)
+        opt["rate_target"]=self.rate_for_target()
 
         # ************* source data *****************
         if self.eval ==-1 or self.eval==1:
@@ -49,7 +50,7 @@ class DataLoader(object):
                     opt["source"+str(self.source_num)+"_item_num"] = len(source_item)
                     assert opt["source"+str(self.source_num)+"_user_num"] == opt["target_user_num"]
 
-                    opt["rate"] = self.rate()
+                    opt["rate"+str(self.source_num)] = self.rate()
 
                     if evaluation == -1:
                         data = self.preprocess()
@@ -131,6 +132,12 @@ class DataLoader(object):
         source_ma_set=self.source_data[self.source_num]['source_ma_set']
         for i in range(len(source_ma_set)):
             ret = len(source_ma_set[i]) / (len(source_ma_set[i]) + len(self.target_ma_set[i]))
+        return ret
+
+    def rate_for_target(self):
+        ret=[]
+        for i in range(len(self.target_ma_set)):
+            ret=len(self.target_ma_set[i])/(len(self.target_ma_set[i])+len(self.target_ma_set[i]))
         return ret
 
     def preprocess_for_predict(self):

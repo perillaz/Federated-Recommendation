@@ -20,16 +20,16 @@ class crossVBGE(nn.Module):
         self.encoder = nn.ModuleList(self.encoder)
         self.dropout = opt["dropout"]
 
-    def forward(self, source_ufea, target_ufea, source_UV_adj, source_VU_adj, target_UV_adj, target_VU_adj):
+    def forward(self, current_source,source_ufea, target_ufea, source_UV_adj, source_VU_adj, target_UV_adj, target_VU_adj):
         learn_user_source = source_ufea
         learn_user_target = target_ufea
         for layer in self.encoder[:-1]:
             learn_user_source = F.dropout(learn_user_source, self.dropout, training=self.training)
             learn_user_target = F.dropout(learn_user_target, self.dropout, training=self.training)
-            learn_user_source, learn_user_target = layer(learn_user_source, learn_user_target, source_UV_adj,
+            learn_user_source, learn_user_target = layer(current_source, learn_user_source, learn_user_target, source_UV_adj,
                                                          source_VU_adj, target_UV_adj, target_VU_adj)
 
-        mean, sigma, = self.encoder[-1](learn_user_source, learn_user_target, source_UV_adj,
+        mean, sigma, = self.encoder[-1](current_source, learn_user_source, learn_user_target, source_UV_adj,
                                                          source_VU_adj, target_UV_adj, target_VU_adj)
         return mean, sigma
 
@@ -70,12 +70,22 @@ class DGCNLayer(nn.Module):
         self.source_user_union = nn.Linear(opt["feature_dim"] + opt["feature_dim"], opt["feature_dim"])
         self.target_user_union = nn.Linear(opt["feature_dim"] + opt["feature_dim"], opt["feature_dim"])
 
-        self.source_rate = torch.tensor(self.opt["rate"]).view(-1)
+        clients_list = self.opt["clients"].split(",")
+        target = self.opt["target"]
+        current_source=0
+        self.source_rate={}
+        for i in clients_list:
+            if i != target:
+                current_source+=1
+                self.source_rate[current_source] = torch.tensor(self.opt["rate"+str(current_source)]).view(-1)
+        self.target_rate = torch.tensor(self.opt["rate_target"]).view(-1)
 
         if self.opt["cuda"]:
-            self.source_rate = self.source_rate.cuda()
+            for i in range(current_source):
+                self.source_rate[i+1]=self.source_rate[i+1].cuda()
+            self.target_rate = self.target_rate.cuda()
 
-    def forward(self, source_ufea, target_ufea, source_UV_adj, source_VU_adj, target_UV_adj, target_VU_adj):
+    def forward(self, current_source,source_ufea, target_ufea, source_UV_adj, source_VU_adj, target_UV_adj, target_VU_adj):
         source_User_ho = self.gc1(source_ufea, source_VU_adj)
         source_User_ho = self.gc3(source_User_ho, source_UV_adj)
 
@@ -87,7 +97,7 @@ class DGCNLayer(nn.Module):
         target_User = torch.cat((target_User_ho, target_ufea), dim=1)
         target_User = self.target_user_union(target_User)
 
-        return self.source_rate * F.relu(source_User) +  (1 - self.source_rate) * F.relu(target_User), self.source_rate * F.relu(source_User) + (1 - self.source_rate) * F.relu(target_User)
+        return self.source_rate[current_source] * F.relu(source_User) + (1 - self.source_rate[current_source]) * F.relu(target_User), self.target_rate * F.relu(target_User) + (1 - self.target_rate) * F.relu(source_User)
 
 
 class LastLayer(nn.Module):
@@ -141,10 +151,18 @@ class LastLayer(nn.Module):
         self.target_user_union_mean = nn.Linear(opt["feature_dim"] + opt["feature_dim"], opt["feature_dim"])
         self.target_user_union_logstd = nn.Linear(opt["feature_dim"] + opt["feature_dim"], opt["feature_dim"])
 
-        self.source_rate = torch.tensor(self.opt["rate"]).view(-1)
+        clients_list = self.opt["clients"].split(",")
+        target = self.opt["target"]
+        current_source = 0
+        self.source_rate = {}
+        for i in clients_list:
+            if i != target:
+                current_source += 1
+                self.source_rate[current_source] = torch.tensor(self.opt["rate" + str(current_source)]).view(-1)
 
         if self.opt["cuda"]:
-            self.source_rate = self.source_rate.cuda()
+            for i in range(current_source):
+                self.source_rate[i + 1] = self.source_rate[i + 1].cuda()
 
 
     def _kld_gauss(self, mu_1, logsigma_1, mu_2, logsigma_2):
@@ -169,7 +187,7 @@ class LastLayer(nn.Module):
         kld_loss = self._kld_gauss(mean, logstd, torch.zeros_like(mean), torch.ones_like(logstd))
         return sampled_z, kld_loss
 
-    def forward(self, source_ufea, target_ufea, source_UV_adj, source_VU_adj, target_UV_adj, target_VU_adj):
+    def forward(self, current_source,source_ufea, target_ufea, source_UV_adj, source_VU_adj, target_UV_adj, target_VU_adj):
         source_User_ho = self.gc1(source_ufea, source_VU_adj)
         source_User_ho_mean = self.gc3_mean(source_User_ho, source_UV_adj)
         source_User_ho_logstd = self.gc3_logstd(source_User_ho, source_UV_adj)
@@ -194,6 +212,6 @@ class LastLayer(nn.Module):
             dim=1)
         target_User_logstd = self.target_user_union_logstd(target_User_logstd)
 
-        return self.source_rate * source_User_mean + (1 - self.source_rate) * target_User_mean, self.source_rate * source_User_logstd + (1 - self.source_rate) * target_User_logstd
+        return self.source_rate[current_source] * source_User_mean + (1 - self.source_rate[current_source]) * target_User_mean, self.source_rate[current_source] * source_User_logstd + (1 - self.source_rate[current_source]) * target_User_logstd
 
 
